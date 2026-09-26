@@ -1,0 +1,5 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist/client",
+  "rewrites": [{ "source": "/join/:code", "destination": "/index.html" }]
+}

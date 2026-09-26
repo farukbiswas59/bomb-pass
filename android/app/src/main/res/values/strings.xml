@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BOMB PASS</string>
+    <string name="title_activity_main">BOMB PASS</string>
+    <string name="package_name">com.bombpass.game</string>
+    <string name="custom_url_scheme">com.bombpass.game</string>
+</resources>
