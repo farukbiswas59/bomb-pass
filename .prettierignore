@@ -1,0 +1,9 @@
+dist
+node_modules
+.vite
+pnpm-lock.yaml
+test-results
+playwright-report
+.env.example
+Dockerfile
+android

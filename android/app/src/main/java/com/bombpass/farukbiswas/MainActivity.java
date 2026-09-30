@@ -1,4 +1,4 @@
-package com.bombpass.game;
+package com.bombpass.farukbiswas;
 
 import com.getcapacitor.BridgeActivity;
 

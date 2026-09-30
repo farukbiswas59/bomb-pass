@@ -8,6 +8,7 @@ import {
   idleInput,
   lineOfSight,
   move,
+  tagTargets,
   type Player,
   type Input,
   type Settings,
@@ -38,6 +39,10 @@ export type Member = {
   tagHit: boolean;
   lastEmote: number;
   lastSeq: number;
+  botThinkAt: number;
+  botMove: { x: number; y: number };
+  botTarget: string;
+  botTagAt: number;
 };
 export class Room {
   members = new Map<string, Member>();
@@ -93,6 +98,7 @@ export class Room {
       protectedUntil: 0,
       tagUntil: 0,
       tagReady: 0,
+      tagQueuedUntil: 0,
       dashUntil: 0,
       dashReady: 0,
       dashX: 0,
@@ -117,6 +123,10 @@ export class Room {
       tagHit: false,
       lastEmote: 0,
       lastSeq: 0,
+      botThinkAt: 0,
+      botMove: { x: 0, y: 0 },
+      botTarget: '',
+      botTagAt: 0,
     };
     this.members.set(id, m);
     if (!this.host && !bot) this.host = id;
@@ -171,6 +181,7 @@ export class Room {
         longest: 0,
         tagUntil: 0,
         tagReady: 0,
+        tagQueuedUntil: 0,
         dashUntil: 0,
         dashReady: 0,
         shieldUntil: 0,
@@ -184,6 +195,10 @@ export class Room {
       m.queue = [];
       m.latest = idleInput(m.lastSeq);
       m.lastActive = this.now;
+      m.botThinkAt = 0;
+      m.botTarget = '';
+      m.botTagAt = 0;
+      m.botMove = { x: 0, y: 0 };
     });
   }
   input(id: string, input: Input) {
@@ -196,7 +211,13 @@ export class Room {
       m.player.afk = false;
     }
     // A flood cannot buy extra simulation time. Bound latency from queued packets.
-    if (m.queue.length >= 5) m.queue.shift();
+    if (m.queue.length >= 5) {
+      const dropped = m.queue.shift()!;
+      const next = m.queue[0];
+      next.tag ||= dropped.tag;
+      next.dash ||= dropped.dash;
+      next.power ||= dropped.power;
+    }
     m.queue.push(input);
   }
   emit(type: GameEvent['type'], p: Player, target?: string) {
@@ -210,24 +231,21 @@ export class Room {
     const p = m.player,
       bomb = this.bombs.find((b) => b.owner === p.id);
     if (!bomb || m.tagHit || this.now >= p.tagUntil || this.now < p.protectedUntil) return;
-    const targets = [...this.members.values()]
-      .map((m) => m.player)
-      .filter(
-        (t) =>
-          this.opponents(p, t) &&
-          t.connected &&
-          !t.afk &&
-          this.now >= t.protectedUntil &&
-          this.now >= t.shieldUntil &&
-          this.now >= t.respawnUntil &&
-          !this.bombs.some((b) => b.owner === t.id),
-      );
-    targets.sort((a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y));
+    const targets = tagTargets(
+      p,
+      [...this.members.values()].map((m) => m.player),
+      this.bombs,
+      this.settings.mode,
+      this.now,
+    );
     for (const t of targets) {
       const x = t.x - p.x,
         y = t.y - p.y,
         d = Math.hypot(x, y);
-      if (d > 64 || (d > 1 && (x * p.dx + y * p.dy) / d < 0.35) || !lineOfSight(p, t)) continue;
+      if (d > 0) {
+        p.dx = x / d;
+        p.dy = y / d;
+      }
       p.longest = Math.max(p.longest, this.now - bomb.heldAt);
       p.passes++;
       p.points += 2;
@@ -238,6 +256,7 @@ export class Room {
       t.protectedUntil = this.now + 800;
       m.tagHit = true;
       p.tagUntil = 0;
+      p.tagQueuedUntil = 0;
       this.emit('pass', p, t.id);
       break;
     }
@@ -267,6 +286,7 @@ export class Room {
       p.respawnUntil = this.now + 650;
       p.protectedUntil = this.now + 1400;
       p.tagUntil = 0;
+      p.tagQueuedUntil = 0;
       p.dashUntil = 0;
     }
     this.bombs = this.bombs.filter((b) => b.id !== bomb.id);
@@ -341,40 +361,62 @@ export class Room {
   botInput(m: Member): Input {
     const p = m.player,
       carrying = this.bombs.some((b) => b.owner === p.id);
-    const others = [...this.members.values()]
-      .map((m) => m.player)
-      .filter(
-        (t) =>
-          this.opponents(p, t) &&
-          t.connected &&
-          !t.afk &&
-          (!carrying || !this.bombs.some((b) => b.owner === t.id)),
-      );
-    const target = others.sort(
-      (a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y),
+    const target = tagTargets(
+      p,
+      [...this.members.values()].map((m) => m.player),
+      this.bombs,
+      this.settings.mode,
+      this.now,
     )[0];
-    if (!target) return idleInput();
-    const sign = carrying ? 1 : -1,
-      angle =
-        Math.atan2(target.y - p.y, target.x - p.x) +
-        (carrying ? 0 : Math.sin(this.now / 900 + p.x) * 0.8);
-    let x = Math.cos(angle) * sign,
-      y = Math.sin(angle) * sign;
-    const probe = { x: p.x, y: p.y };
-    move(probe, x * 28, y * 28);
-    if (Math.hypot(probe.x - p.x, probe.y - p.y) < 12) {
-      const turn = this.now / 700;
-      x = Math.cos(turn);
-      y = Math.sin(turn);
+    // Give people time to dodge. Losing the target resets the reaction timer.
+    if (!target || target.id !== m.botTarget) {
+      m.botTarget = target?.id || '';
+      m.botTagAt = this.now + 450 + this.random() * 150;
     }
-    return {
-      seq: 0,
-      x,
-      y,
-      tag: carrying && Math.hypot(target.x - p.x, target.y - p.y) < 75 && this.random() < 0.3,
-      dash: this.random() < 0.008,
-      power: !!p.power && this.random() < 0.04,
-    };
+    const tag = !!target && this.now >= m.botTagAt && this.now >= p.tagReady;
+    if (tag) m.botTagAt = this.now + 800;
+    let dash = false,
+      power = false;
+    if (this.now >= m.botThinkAt) {
+      m.botThinkAt = this.now + 350 + this.random() * 200;
+      const others = [...this.members.values()]
+        .map((m) => m.player)
+        .filter(
+          (t) =>
+            this.opponents(p, t) &&
+            t.connected &&
+            !t.afk &&
+            this.now >= t.respawnUntil &&
+            (!carrying || !this.bombs.some((b) => b.owner === t.id)),
+        );
+      const nearest = others.sort(
+        (a, b) => Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y),
+      )[0];
+      m.botMove = { x: 0, y: 0 };
+      if (nearest) {
+        const distance = Math.hypot(nearest.x - p.x, nearest.y - p.y);
+        // Pause near a target instead of running through it while waiting to tag.
+        if (!carrying || distance > 48) {
+          const sign = carrying ? 1 : -1;
+          const angle =
+            Math.atan2(nearest.y - p.y, nearest.x - p.x) +
+            (carrying ? 0 : Math.sin(this.now / 900) * 0.7);
+          let x = Math.cos(angle) * sign,
+            y = Math.sin(angle) * sign;
+          const probe = { x: p.x, y: p.y };
+          move(probe, x * 36, y * 36);
+          if (Math.hypot(probe.x - p.x, probe.y - p.y) < 16) {
+            const turn = this.now / 700;
+            x = Math.cos(turn);
+            y = Math.sin(turn);
+          }
+          m.botMove = { x, y };
+        }
+        dash = distance > 160 && this.random() < 0.05;
+        power = !!p.power && this.random() < 0.2;
+      }
+    }
+    return { seq: 0, ...m.botMove, tag, dash, power };
   }
   finish() {
     for (const b of this.bombs) {
@@ -428,7 +470,12 @@ export class Room {
         m.latest = { ...input, tag: false, dash: false, power: false };
         p.ack = input.seq;
       } else input = now - m.receivedAt < 250 ? m.latest : idleInput(p.ack);
-      if (!p.connected || p.afk) input = idleInput(p.ack);
+      if (!p.connected || p.afk) {
+        input = idleInput(p.ack);
+        p.tagQueuedUntil = 0;
+        p.tagUntil = 0;
+        p.dashUntil = 0;
+      }
       const dash = p.dashReady,
         tag = p.tagReady;
       if (input.power) this.usePower(p);

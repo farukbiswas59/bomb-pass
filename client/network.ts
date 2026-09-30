@@ -34,7 +34,8 @@ export class GameConnection {
       reconnection: true,
       reconnectionDelay: 500,
       reconnectionDelayMax: 2000,
-      timeout: 5000,
+      // A sleeping hosted instance can need a minute for its first connection.
+      timeout: this.mode === 'lan' ? 5000 : 65000,
       forceNew: true,
     });
   }
@@ -45,7 +46,7 @@ export class GameConnection {
   seq = 0;
   pending: Input[] = [];
   receivedAt = 0;
-  status = 'Connecting…';
+  status = 'Connecting… First start may take a minute';
   ping = 0;
   error = '';
   listeners = new Set<() => void>();
@@ -117,11 +118,19 @@ export class GameConnection {
     this.socket.on('disconnect', (reason) => {
       this.status = 'Reconnecting…';
       this.pending = [];
+      this.socket.sendBuffer = [];
       this.notify();
       if (reason === 'io server disconnect' && !this.session) this.socket.connect();
     });
-    this.socket.on('connect_error', () => {
-      this.status = 'Server unavailable · retrying';
+    this.socket.on('connect_error', (error) => {
+      const detail = error as Error & { description?: unknown; context?: { status?: number } };
+      const rejected = detail.description === 403 || detail.context?.status === 403;
+      this.status = rejected ? 'Connection rejected by server' : 'Connecting to server · retrying';
+      this.error = rejected
+        ? 'The server has blocked this app’s connection. Ask the host to allow this app.'
+        : this.mode === 'online'
+          ? 'The server may be starting. Keep this screen open for up to a minute, or check your internet connection.'
+          : 'Check that the Wi-Fi host is running and both devices are on the same network.';
       this.notify();
     });
     this.socket.on('state', (s: Snapshot) => this.receive(s));
@@ -139,7 +148,7 @@ export class GameConnection {
     this.endpoint = endpoint;
     this.mode = mode;
     this.error = '';
-    this.status = 'Connecting…';
+    this.status = mode === 'lan' ? 'Connecting…' : 'Connecting… First start may take a minute';
     this.ping = 0;
     try {
       if (endpoint) localStorage.setItem('bp.server', JSON.stringify({ endpoint, mode }));
@@ -252,7 +261,9 @@ export class GameConnection {
       command,
       this.snapshot.now + (performance.now() - this.receivedAt),
     );
-    this.socket.volatile.emit('input', command);
+    // A movement sample can be skipped under backpressure; a tap must not be.
+    if (command.tag || command.dash || command.power) this.socket.emit('input', command);
+    else this.socket.volatile.emit('input', command);
   }
   remotePlayers() {
     const at = performance.now() - 100;

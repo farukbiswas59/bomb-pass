@@ -1,12 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { networkInterfaces } from 'node:os';
+import { isPrivateHost } from '../../shared/connection';
 
 test('two players join the same Wi-Fi host and LAN stays connected without internet', async ({
   browser,
 }) => {
   const ip = Object.values(networkInterfaces())
     .flat()
-    .find((n) => n?.family === 'IPv4' && !n.internal && n.address.startsWith('192.168.'))?.address;
+    .find((n) => n?.family === 'IPv4' && !n.internal && isPrivateHost(n.address))?.address;
   test.skip(!ip, 'A private Wi-Fi interface is required for this integration check.');
   const a = await browser.newContext(),
     b = await browser.newContext();

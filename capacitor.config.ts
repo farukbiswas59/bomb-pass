@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.bombpass.game',
+  appId: 'com.bombpass.farukbiswas',
   appName: 'BOMB PASS',
   webDir: 'dist/client',
   server: { androidScheme: 'http' },
