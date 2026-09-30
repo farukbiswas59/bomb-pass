@@ -216,6 +216,9 @@ export function createGameServer(
         m.socketId = null;
         m.disconnectedAt = room.now;
         m.player.connected = false;
+        m.player.tagQueuedUntil = 0;
+        m.player.tagUntil = 0;
+        m.player.dashUntil = 0;
         m.queue = [];
         m.latest = idleInput(m.lastSeq);
         room.rehost();
