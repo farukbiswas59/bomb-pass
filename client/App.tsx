@@ -85,7 +85,7 @@ function Rules() {
       <div>
         <b>02</b>
         <span>
-          <strong>Tag.</strong> Face a rival. Pass the bomb.
+          <strong>Tag.</strong> Get close. Tap once to pass.
         </span>
       </div>
       <div>
@@ -260,7 +260,11 @@ function Controls({ input, p, s }: { input: InputController; p?: Player; s: Snap
           }}
         >
           <span>TAG</span>
-          <kbd>SPACE</kbd>
+          <small className="tag-status">
+            {p && Math.max(p.tagReady, p.protectedUntil, p.respawnUntil) > s.now
+              ? `WAIT ${((Math.max(p.tagReady, p.protectedUntil, p.respawnUntil) - s.now) / 1000).toFixed(1)}s`
+              : 'TAP ONCE'}
+          </small>
         </button>
       </div>
     </div>
@@ -323,7 +327,7 @@ function Arena({ s }: { s: Snapshot }) {
           <div className="countdown">
             <span>GET READY</span>
             <strong>{Math.max(1, Math.ceil((s.startsAt - s.now) / 1000))}</strong>
-            <small>Move · Face a rival · Tag</small>
+            <small>Move · Find a TAG marker · Tap once</small>
           </div>
         )}
         {!net.socket.connected && (
@@ -723,7 +727,7 @@ export function App() {
             <p className="callout">
               The bomb won’t pass itself.
               <br />
-              <strong>Face a rival and hit TAG.</strong>
+              <strong>Get close to a marked rival and tap TAG.</strong>
             </p>
           </aside>
         </main>

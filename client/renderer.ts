@@ -1,4 +1,4 @@
-import { ARENA, COLORS, type Player } from '../shared/game';
+import { ARENA, TAG_RANGE, tagTargets, type Player } from '../shared/game';
 import { net } from './network';
 import { audio } from './audio';
 export class Renderer {
@@ -94,7 +94,23 @@ export class Renderer {
           item.y + 6,
         );
       }
-      for (const p of net.remotePlayers()) this.player(c, p, now);
+      const players = net.remotePlayers();
+      for (const p of players) this.player(c, p, now);
+      const local = players.find((p) => p.id === net.id);
+      const targets =
+        local &&
+        net.socket.connected &&
+        s.phase === 'playing' &&
+        (now >= local.tagReady || now < local.tagUntil)
+          ? tagTargets(local, players, s.bombs, s.settings.mode, now)
+          : [];
+      this.canvas.setAttribute(
+        'aria-description',
+        targets.length
+          ? `In tag range: ${targets.map((p) => p.name).join(', ')}. Tap Tag once.`
+          : 'Move close to an unprotected opponent to pass the bomb.',
+      );
+      for (const [i, target] of targets.entries()) this.targetMarker(c, target, i === 0);
       for (const e of s.events)
         if (e.id > this.lastEvent) {
           if (e.type === 'explode' || e.type === 'pass')
@@ -135,6 +151,27 @@ export class Renderer {
       }
     this.frame = requestAnimationFrame(this.draw);
   };
+  targetMarker(c: CanvasRenderingContext2D, p: Player, nearest: boolean) {
+    c.save();
+    c.translate(p.x, p.y);
+    c.strokeStyle = nearest ? '#beff55' : '#e7ffc2';
+    c.lineWidth = nearest ? 3 : 2;
+    for (const sx of [-1, 1])
+      for (const sy of [-1, 1]) {
+        c.beginPath();
+        c.moveTo(sx * 20, sy * 29);
+        c.lineTo(sx * 29, sy * 29);
+        c.lineTo(sx * 29, sy * 20);
+        c.stroke();
+      }
+    c.fillStyle = nearest ? '#beff55' : '#e7ffc2';
+    c.fillRect(-20, -65, 40, 19);
+    c.fillStyle = '#101924';
+    c.font = 'bold 12px ui-monospace, monospace';
+    c.textAlign = 'center';
+    c.fillText('TAG', 0, -51);
+    c.restore();
+  }
   player(c: CanvasRenderingContext2D, p: Player, now: number) {
     const bomb = net.snapshot?.bombs.find((b) => b.owner === p.id),
       local = p.id === net.id;
@@ -168,11 +205,10 @@ export class Renderer {
       c.setLineDash([]);
     }
     if (now < p.tagUntil) {
-      const a = Math.atan2(p.dy, p.dx);
       c.strokeStyle = '#d2ff8f';
       c.lineWidth = 6;
       c.beginPath();
-      c.arc(0, 0, 48, a - 1.1, a + 1.1);
+      c.arc(0, 0, TAG_RANGE, 0, Math.PI * 2);
       c.stroke();
     }
     c.fillStyle = '#050912';

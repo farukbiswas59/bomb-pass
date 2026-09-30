@@ -684,9 +684,10 @@ footer {
   font-size: 26px;
   font-weight: 900;
 }
-.tag-button kbd {
-  border-color: #7c9b45;
-  font-size: 9px;
+.tag-status {
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
 }
 .dash-button {
   width: 72px;
