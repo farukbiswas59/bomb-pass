@@ -1,6 +1,11 @@
 export const STEP = 1000 / 30;
 export const RADIUS = 15;
 export const SPEED = 180;
+export const TAG_RANGE = 78;
+export const TAG_WINDOW = 260;
+export const TAG_COOLDOWN = 650;
+export const TAG_BUFFER = 220;
+export const BOT_SPEED = 0.82;
 export const RECONNECT_MS = 20_000;
 export const COLORS = [
   '#beff55',
@@ -85,6 +90,7 @@ export type Player = {
   protectedUntil: number;
   tagUntil: number;
   tagReady: number;
+  tagQueuedUntil: number;
   dashUntil: number;
   dashReady: number;
   dashX: number;
@@ -175,10 +181,46 @@ export function lineOfSight(a: { x: number; y: number }, b: { x: number; y: numb
     if (blocked(a.x + ((b.x - a.x) * i) / steps, a.y + ((b.y - a.y) * i) / steps, 1)) return false;
   return true;
 }
+// Shared by the authoritative server and the opponent marker. No client hit claims.
+export function tagTargets(
+  p: Player,
+  players: Player[],
+  bombs: readonly { owner: string }[],
+  mode: Settings['mode'],
+  now: number,
+) {
+  if (
+    !p.connected ||
+    p.afk ||
+    now < p.respawnUntil ||
+    now < p.protectedUntil ||
+    !bombs.some((b) => b.owner === p.id)
+  )
+    return [];
+  return players
+    .filter(
+      (t) =>
+        t.id !== p.id &&
+        (mode === 'ffa' || t.team !== p.team) &&
+        t.connected &&
+        !t.afk &&
+        now >= t.protectedUntil &&
+        now >= t.shieldUntil &&
+        now >= t.respawnUntil &&
+        !bombs.some((b) => b.owner === t.id) &&
+        Math.hypot(t.x - p.x, t.y - p.y) <= TAG_RANGE &&
+        lineOfSight(p, t),
+    )
+    .sort(
+      (a, b) =>
+        Math.hypot(a.x - p.x, a.y - p.y) - Math.hypot(b.x - p.x, b.y - p.y) ||
+        a.id.localeCompare(b.id),
+    );
+}
 // Shared deterministic movement. Client predicts only this; outcomes remain on server.
 export function advancePlayer(p: Player, input: Input, now: number, dt = STEP) {
   if (now < p.respawnUntil) return;
-  const v = normalized(input.x, input.y);
+  const v = Math.hypot(input.x, input.y) < 0.08 ? { x: 0, y: 0 } : normalized(input.x, input.y);
   if (Math.hypot(v.x, v.y) > 0.08) {
     const l = Math.hypot(v.x, v.y);
     p.dx = v.x / l;
@@ -190,16 +232,19 @@ export function advancePlayer(p: Player, input: Input, now: number, dt = STEP) {
     p.dashX = p.dx;
     p.dashY = p.dy;
   }
-  if (input.tag && now >= p.tagReady && now >= p.protectedUntil) {
-    p.tagReady = now + 650;
-    p.tagUntil = now + 240;
+  if (p.tagQueuedUntil <= now) p.tagQueuedUntil = 0;
+  if (input.tag) p.tagQueuedUntil = now + TAG_BUFFER;
+  if (p.tagQueuedUntil > now && now >= p.tagReady && now >= p.protectedUntil) {
+    p.tagReady = now + TAG_COOLDOWN;
+    p.tagUntil = now + TAG_WINDOW;
+    p.tagQueuedUntil = 0;
   }
-  const dash = now < p.dashUntil,
-    lunge = now < p.tagUntil;
-  const speed = (dash ? 650 : lunge ? 260 : SPEED) * (now < p.slowUntil ? 0.45 : 1);
+  // Tagging no longer forces movement or steals joystick steering.
+  const dash = now < p.dashUntil;
+  const speed = (dash ? 650 : SPEED) * (now < p.slowUntil ? 0.45 : 1) * (p.bot ? BOT_SPEED : 1);
   move(
     p,
-    ((dash ? p.dashX : lunge ? p.dx : v.x) * speed * dt) / 1000,
-    ((dash ? p.dashY : lunge ? p.dy : v.y) * speed * dt) / 1000,
+    ((dash ? p.dashX : v.x) * speed * dt) / 1000,
+    ((dash ? p.dashY : v.y) * speed * dt) / 1000,
   );
 }
