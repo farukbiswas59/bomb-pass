@@ -8,6 +8,8 @@ This delivery prioritizes networking, collision validation, and touch controls. 
 
 ## Run locally
 
+For live-ad account setup and the store-release process, see [ADMOB-PLAY-STORE.md](ADMOB-PLAY-STORE.md). The current APK uses demo ads only.
+
 Install Node.js 22 or later, then from this folder:
 
 ```sh
@@ -34,7 +36,7 @@ On a phone on the **same Wi-Fi**, open `http://YOUR_COMPUTER_LAN_IP:5173`. Use t
 - FFA and automatically balanced teams; 1/2/3-minute rounds, 3/5/7 lives, optional power-ups.
 - One portrait arena with four large obstacles and two smaller barriers. Geometry and spawn points live in `shared/game.ts`.
 - A 30 Hz authoritative simulation; 15 Hz snapshots; 30 Hz input; local prediction/reconciliation; remote player interpolation with a 100 ms buffer.
-- Directional 240 ms tag lunge, wall/line-of-sight checks, 650 ms tag cooldown, 800 ms receive protection; 3-second dash cooldown.
+- One-tap nearest-opponent tagging within 78 arena units, a 260 ms active window, 220 ms input buffer, wall/line-of-sight checks, 650 ms cooldown and 800 ms receive protection; 3-second dash cooldown. Tagging preserves movement control.
 - Secret 8–14-second fuse (shorter late in a round), coarse danger cues, life loss, short respawn, collision-checked knockback, 1.2-second bomb replacement delay.
 - Double-bomb and three-bomb endgame scaled to duration and player count. Duels keep one bomb.
 - Zero-life danger mode, lives-first winner calculation, points tiebreaker, shared ties, MVP and statistics, fast rematch.
@@ -53,7 +55,7 @@ On a phone on the **same Wi-Fi**, open `http://YOUR_COMPUTER_LAN_IP:5173`. Use t
 | Dash           | Shift                     | DASH          |
 | Use held power | E                         | Power button  |
 
-Face an opponent and tag within range. Overlapping someone is insufficient. Teammates, existing bomb carriers, shielded/protected players, respawning players and AFK players cannot receive a tag. Players can move through one another; arena walls remain solid.
+Carry the bomb, move close to an opponent with a green TAG marker, and tap TAG once. The nearest valid target is selected regardless of facing. WAIT on the button shows cooldown or protection time. Overlapping someone is insufficient. Teammates, existing bomb carriers, shielded/protected players, respawning players and AFK players cannot receive a tag. Players can move through one another; arena walls remain solid.
 
 Most remaining lives wins; points resolve equal lives. Teams compare summed lives then summed points. A successful pass earns 2 points; a transfer in the last 1.5 seconds earns 1 extra; causing an explosion earns 5 (8 if the recipient was already at zero lives); each explosion costs 5. Zero lives never eliminates a casual player.
 
@@ -68,7 +70,7 @@ tests/   Simulation, live Socket.IO integration, browser/multitouch checks
 
 React handles menus and HUD; a small Canvas 2D renderer draws the arena directly. A custom shared movement implementation keeps server collision and client prediction identical without duplicating Phaser physics or shipping a second engine. No gameplay outcome is decided by the renderer.
 
-Clients submit bounded direction/action inputs and monotonically increasing sequence numbers. Server ticks, not packet frequency or client elapsed time, determine movement. Input queues are capped; diagonal movement is normalized; dashes/knockback use short collision substeps to prevent tunnelling. Tags require a forward arc, distance, valid opponent and clear line of sight. Fuse expiry precedes tags on the same tick. Snapshots explicitly omit fuse deadlines, original fuse lengths and session secrets.
+Clients submit bounded direction/action inputs and monotonically increasing sequence numbers. Server ticks, not packet frequency or client elapsed time, determine movement. Input queues are capped; diagonal movement is normalized; dashes/knockback use short collision substeps to prevent tunnelling. Tags require distance, a valid opponent and clear line of sight. Action packets use reliable transport; overflowing movement queues preserve pending actions without granting extra simulation time. Range markers use the same eligibility rules as the server. Bots move at 82% of human speed, update movement every 350–550 ms, and take 450–600 ms to react to a taggable rival. Fuse expiry precedes tags on the same tick. Snapshots explicitly omit fuse deadlines, original fuse lengths and session secrets.
 
 Socket messages use strict schemas, 4 KB payload limits, per-connection input/action budgets, admission limits and room capacity limits. Production rejects unlisted browser origins. Guest bearer tokens are random server-generated UUIDs kept in sessionStorage. A duplicated tab may inherit a session; resuming it moves that player to the new tab and informs the original one. Open a fresh tab/link or a separate browser context to play as another guest.
 
@@ -88,7 +90,7 @@ Browser tests launch the development servers if they are not running. They use i
 Manual device acceptance still matters:
 
 1. Join one room from two physical phones on the same Wi-Fi. Start a match, hold the joystick and repeatedly alternate tag/dash with the other thumb.
-2. Chase around all obstacle edges and corners; try tagging through each wall, tagging backwards, and immediately passing back.
+2. Chase around all obstacle edges and corners; verify walls prevent tags, a single tap works even when facing away, and receive protection prevents immediate passing back.
 3. Rotate both ways, background/foreground the tab, briefly disable Wi-Fi, and reload. Check that input stops when backgrounded and that a reconnect within 20 seconds preserves player ID/lives.
 4. Test iPhone Safari, Android Chrome and Samsung Internet on physical devices. Check audio unlock, safe areas, browser gesture edges and thermal performance.
 5. Run ten real devices/tabs through FFA and teams, including 5v5, the two-/three-bomb endgame, zero-life play and repeated rematches.

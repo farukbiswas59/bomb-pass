@@ -1,3 +1,43 @@
+# Physics, tagging and Android package update — 26 September 2026
+
+Version `0.3.0-test` (version code 4), package `com.bombpass.farukbiswas`.
+
+Implemented reliable action packets, preservation of taps across bounded queue overflow, a 220 ms cooldown/protection input buffer, nearest-eligible-target assistance within 78 arena units and a 260 ms active window. Tagging no longer forces movement; a small joystick deadzone prevents drift. Server validation still enforces walls, range, protection, shields and opposing teams. Bots move at 82% of human speed and use slower movement decisions and 450–600 ms tag reactions. Green TAG markers share the server eligibility rules; cooldown/protection feedback stays visible on phones.
+
+Verification passed:
+
+- TypeScript, production client/server builds, Capacitor sync and Gradle debug APK compilation.
+- 41 simulation, real Socket.IO, connection and LAN tests, including one-tap passes, nearest-target selection, cooldown buffering, expired inputs, overflow retention, drift/steering, eligibility and bot reactions.
+- All 8 browser scenarios passed: full match/rematch, recovery, mobile multitouch/cancel/orientation, 150 ms latency, LAN, ads, connection selection and the new real touch test. The touch/marker test uses an isolated server, briefly makes the transport busy, taps once and verifies exactly one authoritative pass without moving the player. It also checks the mobile WAIT label. The two affected mobile tests were rerun after the final label fix and passed.
+- Screenshot `test-results/mobile-tag-marker.png` inspected at 375×667.
+- APK signature, ZIP alignment, package/version and SDK metadata checked. The package change installs this as a separate app from the previous `com.bombpass.game` APK.
+
+APK SHA-256: `4618222c2c0c49571a84a36eefa9d769a1f4e2dcb0e1aafb21b8f07d59c2d879`.
+
+The matching source must be deployed to Render for these server-side rules to apply to online play. This verification covers local servers; this gameplay revision has not yet been published to GitHub/Render. The previously approved live CORS configuration remains unchanged. Ads remain Google's demo units. Physical Android installation, gameplay and native ads are not yet device-tested. This is a debug build, not a signed Play Store release.
+
+# Live connection fix — 26 September 2026
+
+The Render service previously allowed only `https://bomb-pass-puce.vercel.app`, producing HTTP 403 for the Android origin and the service's own website. Following explicit user approval, `ALLOWED_ORIGINS` was changed to `https://bomb-pass-puce.vercel.app,https://bomb-pass-ugre.onrender.com,http://localhost` and deployed. Render reported deployment `dep-darsfqm0tbcc73csdjj0` live. No source commit, hosting-plan upgrade or wildcard origin was needed.
+
+Post-deploy live checks passed for all three origins. Two Socket.IO clients using the APK's `http://localhost` origin joined a private room, started a match and received playing snapshots. A separate two-context Chromium check loaded the actual production frontend at that same origin, enforcing browser CORS, and joined/started a match against Render. Test players left their rooms afterward. An unlisted website origin still returned HTTP 403.
+
+APK `0.2.2-test` (version code 3) retains the default Render endpoint and adds a 65-second online connection timeout plus clearer startup/rejection messages. Wi-Fi attempts retain their 5-second timeout. TypeScript, production builds, Capacitor sync and Gradle packaging passed. Signature and alignment checks passed; the certificate matches prior APKs. SHA-256: `49b1982953d36e5d13987e9eca33bd69d6f846a5af1a84ab428fa4145ce6bfe8`.
+
+AdMob remains in demo mode. [ADMOB-PLAY-STORE.md](ADMOB-PLAY-STORE.md) documents the account and release work still required; no live IDs, consent flow or store signing credentials were added. Physical Android installation, gameplay and native ad display still need device testing.
+
+Regression verification: 33 simulation/network tests and all 7 browser tests passed, including mobile multitouch, a complete match/rematch, simulated latency, LAN recovery and ad preferences. The local development proxy was restarted after its configuration had been disrupted by earlier file/dependency replacement. The LAN check now recognizes all supported private IPv4 ranges, including the current 10.x network. Formatting and TypeScript checks passed.
+
+# Default backend update — 26 September 2026 (before the live fix above)
+
+Version `0.2.1-test` (version code 2) bundles `https://bomb-pass-ugre.onrender.com` as the default online backend through `.env.production`. Development uses the local proxy, private-network browser hosts keep LAN mode, and saved server preferences still take priority.
+
+TypeScript, the production web/server build, Capacitor sync and Gradle `:app:assembleDebug` passed. A production Chromium smoke check verified the displayed default, initial connection target, online address prefill and Wi-Fi selector. External requests were intercepted in this UI check; it does not establish successful multiplayer admission.
+
+The delivered `outputs/bomb-pass-0.2.1-test.apk` passed signature and ZIP alignment checks. Its package metadata is `com.bombpass.game`, code 2, minimum API 24 and target API 36. Its signing certificate matches the earlier APK, and inspection of the packaged JavaScript confirmed the requested URL. SHA-256: `4cd59bfa0aa635a7b34152a9b3980cb6647e71c2cc2a6d260401255d865d61e7`.
+
+The live backend `/health` returned `{"ok":true,"rooms":0}`, but its Socket.IO endpoint returned HTTP 403 (`Forbidden`) for `Origin: http://localhost`, the APK's WebView origin. The backend operator must append `http://localhost` to the existing `ALLOWED_ORIGINS` and restart/redeploy the service before the APK can connect. No Render settings were changed. Physical Android testing remains outstanding.
+
 # Ads, Wi-Fi and Android update — 26 September 2026
 
 Verified on macOS with the bundled Node runtime and headless Chromium:
