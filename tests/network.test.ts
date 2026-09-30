@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { io, type Socket } from 'socket.io-client';
 import { createGameServer } from '../server/app';
-import { DEFAULT_SETTINGS, type Reply, type Snapshot } from '../shared/game';
+import { DEFAULT_SETTINGS, idleInput, type Reply, type Snapshot } from '../shared/game';
 const sockets: Socket[] = [];
 const servers: ReturnType<typeof createGameServer>[] = [];
 afterEach(async () => {
@@ -106,6 +106,38 @@ describe('real websocket multiplayer', () => {
     const p = game.rooms.get(ra.snapshot!.code)!.members.get(ra.id!)!.player;
     expect(p.lives).toBe(5);
     expect(p.points).toBe(0);
+  });
+  it('passes from one tap under a burst and cancels pending actions on disconnect', async () => {
+    const { game, url } = await setup();
+    const a = await connect(url),
+      b = await connect(url);
+    const host = await request(a, 'join', { kind: 'create', name: 'Tapper' });
+    const guest = await request(b, 'join', {
+      kind: 'join',
+      name: 'Rival',
+      code: host.snapshot!.code,
+    });
+    await request(a, 'start');
+    const room = game.rooms.get(host.snapshot!.code)!;
+    room.startsAt = room.now;
+    room.nextBombAt = room.now;
+    room.tick(room.now);
+    const pa = room.members.get(host.id!)!.player,
+      pb = room.members.get(guest.id!)!.player;
+    Object.assign(pa, { x: 280, y: 350, dx: -1, dy: 0, protectedUntil: 0 });
+    Object.assign(pb, { x: 325, y: 350, protectedUntil: 0 });
+    room.bombs[0].owner = pa.id;
+    a.emit('input', { ...idleInput(1), tag: true });
+    for (let seq = 2; seq < 25; seq++) a.emit('input', idleInput(seq));
+    await sleep(180);
+    expect(room.bombs[0].owner).toBe(pb.id);
+    expect(pa.passes).toBe(1);
+    pa.tagQueuedUntil = room.now + 200;
+    a.disconnect();
+    await sleep(80);
+    expect(pa.tagQueuedUntil).toBe(0);
+    expect(pa.tagUntil).toBe(0);
+    expect(pb.connected).toBe(true);
   });
   it('runs ten clients with consistent snapshots and bounded movement under bursts', async () => {
     const { game, url } = await setup();

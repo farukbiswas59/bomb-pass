@@ -5,6 +5,9 @@ import {
   DEFAULT_SETTINGS,
   STEP,
   SPEED,
+  BOT_SPEED,
+  TAG_RANGE,
+  tagTargets,
   advancePlayer,
   blocked,
   idleInput,
@@ -59,12 +62,9 @@ describe('authoritative simulation', () => {
     expect(bomb.owner).toBe(b.player.id);
     expect(b.player.tagUntil).toBe(0);
   });
-  it('cannot tag backwards or through a wall', () => {
+  it('cannot tag through a wall or beyond reach', () => {
     const { r, a, b, bomb } = setupTag();
-    a.player.dx = -1;
-    a.player.tagUntil = r.now + 240;
-    r.tag(a);
-    expect(bomb.owner).toBe(a.player.id);
+    a.player.tagUntil = r.now + 260;
     Object.assign(a.player, { x: 70, y: 330, dx: 0, dy: 1 });
     Object.assign(b.player, { x: 70, y: 390 });
     r.tag(a);
@@ -73,6 +73,108 @@ describe('authoritative simulation', () => {
     Object.assign(b.player, { x: 480, y: 350 });
     r.tag(a);
     expect(bomb.owner).toBe(a.player.id);
+  });
+  it('one stationary tap selects the nearest valid rival regardless of facing', () => {
+    const { r, a, b, bomb } = setupTag();
+    a.player.dx = -1;
+    const start = { x: a.player.x, y: a.player.y };
+    const farther = { ...b.player, id: 'farther', x: a.player.x + TAG_RANGE };
+    expect(
+      tagTargets(a.player, [farther, b.player], r.bombs, 'ffa', r.now).map((p) => p.id),
+    ).toEqual([b.player.id, farther.id]);
+    r.input(a.player.id, { ...idleInput(1), tag: true });
+    r.tick(r.now + STEP);
+    expect(bomb.owner).toBe(b.player.id);
+    expect(a.player).toMatchObject(start);
+    expect(a.player.passes).toBe(1);
+    for (let i = 0; i < 30; i++) r.tick(r.now + STEP);
+    expect(a.player.passes).toBe(1);
+  });
+  it('buffers one tap near cooldown/protection expiry without requiring another tap', () => {
+    for (const field of ['tagReady', 'protectedUntil'] as const) {
+      const { r, a, b, bomb } = setupTag();
+      a.player[field] = r.now + 150;
+      r.input(a.player.id, { ...idleInput(1), tag: true });
+      r.tick(r.now + STEP);
+      expect(bomb.owner).toBe(a.player.id);
+      for (let i = 0; i < 5; i++) r.tick(r.now + STEP);
+      expect(bomb.owner).toBe(b.player.id);
+      expect(a.player.tagQueuedUntil).toBe(0);
+    }
+  });
+  it('expires a premature tap instead of firing much later', () => {
+    const { r, a, bomb } = setupTag();
+    a.player.protectedUntil = r.now + 800;
+    r.input(a.player.id, { ...idleInput(1), tag: true });
+    for (let i = 0; i < 30; i++) r.tick(r.now + STEP);
+    expect(bomb.owner).toBe(a.player.id);
+    expect(a.player.tagUntil).toBe(0);
+    expect(a.player.tagQueuedUntil).toBe(0);
+  });
+  it('retains a single action when later movement fills the input queue', () => {
+    const { r, a, b, bomb } = setupTag();
+    r.input(a.player.id, { ...idleInput(1), tag: true });
+    for (let seq = 2; seq < 100; seq++) r.input(a.player.id, idleInput(seq));
+    r.tick(r.now + STEP);
+    expect(bomb.owner).toBe(b.player.id);
+    expect(a.player.passes).toBe(1);
+    expect(a.queue.length).toBeLessThanOrEqual(4);
+  });
+  it('ignores joystick drift and preserves steering during a tag', () => {
+    const { r, a } = setupTag();
+    advancePlayer(a.player, { ...idleInput(), x: 0.03, y: -0.03 }, r.now);
+    expect(a.player.x).toBe(280);
+    expect(a.player.y).toBe(350);
+    advancePlayer(a.player, { ...idleInput(), tag: true, y: 1 }, r.now + STEP);
+    expect(a.player.x).toBe(280);
+    expect(a.player.y).toBeCloseTo(350 + SPEED / 30);
+    advancePlayer(a.player, { ...idleInput(), x: -1 }, r.now + 2 * STEP);
+    expect(a.player.x).toBeCloseTo(280 - SPEED / 30);
+    expect(a.player.y).toBeCloseTo(350 + SPEED / 30);
+  });
+  it('marks only eligible opponents and uses the exact server reach', () => {
+    const { r, a, b } = setupTag();
+    const targets = () => tagTargets(a.player, [a.player, b.player], r.bombs, 'ffa', r.now);
+    b.player.x = a.player.x + TAG_RANGE;
+    expect(targets()).toEqual([b.player]);
+    b.player.x += 0.01;
+    expect(targets()).toEqual([]);
+    b.player.x = 325;
+    for (const field of ['protectedUntil', 'shieldUntil', 'respawnUntil'] as const) {
+      b.player[field] = r.now + 1;
+      expect(targets()).toEqual([]);
+      b.player[field] = 0;
+    }
+    b.player.afk = true;
+    expect(targets()).toEqual([]);
+    b.player.afk = false;
+    b.player.connected = false;
+    expect(targets()).toEqual([]);
+    b.player.connected = true;
+    expect(tagTargets(a.player, [b.player], r.bombs, 'teams', r.now)).toEqual([]);
+    Object.assign(a.player, { x: 70, y: 330 });
+    Object.assign(b.player, { x: 70, y: 390 });
+    expect(targets()).toEqual([]);
+    r.bombs = [];
+    expect(targets()).toEqual([]);
+  });
+  it('bots run slower, wait before tagging, and lose their reaction progress when dodged', () => {
+    const { r, a, b } = setupTag();
+    a.player.bot = true;
+    const start = a.player.x;
+    advancePlayer(a.player, { ...idleInput(), x: 1 }, r.now);
+    expect(a.player.x - start).toBeCloseTo((SPEED * BOT_SPEED) / 30);
+    expect(r.botInput(a).tag).toBe(false);
+    r.now += 400;
+    expect(r.botInput(a).tag).toBe(false);
+    r.now += 201;
+    expect(r.botInput(a).tag).toBe(true);
+    b.player.x = 500;
+    expect(r.botInput(a).tag).toBe(false);
+    b.player.x = 325;
+    expect(r.botInput(a).tag).toBe(false);
+    r.now += 601;
+    expect(r.botInput(a).tag).toBe(true);
   });
   it('expiry wins over a same-tick tag, costs life and preserves danger-mode play', () => {
     const { r, a, b, bomb } = setupTag();
