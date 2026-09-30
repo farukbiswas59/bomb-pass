@@ -14,7 +14,7 @@ Verification passed:
 
 APK SHA-256: `4618222c2c0c49571a84a36eefa9d769a1f4e2dcb0e1aafb21b8f07d59c2d879`.
 
-The matching source must be deployed to Render for these server-side rules to apply to online play. This verification covers local servers; this gameplay revision has not yet been published to GitHub/Render. The previously approved live CORS configuration remains unchanged. Ads remain Google's demo units. Physical Android installation, gameplay and native ads are not yet device-tested. This is a debug build, not a signed Play Store release.
+The matching source must be deployed to Render for these server-side rules to apply to online play. These verification results cover local servers; use the GitHub branch and Render dashboard to check deployment status. The previously approved live CORS configuration remains unchanged. Ads remain Google's demo units. Physical Android installation, gameplay and native ads are not yet device-tested. This is a debug build, not a signed Play Store release.
 
 # Live connection fix — 26 September 2026
 
